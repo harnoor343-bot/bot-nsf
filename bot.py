@@ -218,12 +218,39 @@ def check_bestbuy(products: list[Product]) -> dict[str, Result]:
     return out
 
 
-def parse_amazon(html: str, status_code: int = 200) -> Result:
-    if looks_blocked(status_code, html):
-        return Result(BLOCKED, f"captcha / HTTP {status_code}")
-    soup = BeautifulSoup(html, "html.parser")
+AMAZON_CAPTCHA_MARKERS = ("validatecaptcha", "type the characters you see",
+                          "sorry, we just need to make sure you're not a robot",
+                          "click the button below to continue shopping")
+AMAZON_CART_SELECTORS = (
+    "#add-to-cart-button", "#add-to-cart-button-ubb", "#buy-now-button",
+    "input[name='submit.add-to-cart']", "input[name='submit.addToCart']",
+    "input[name='submit.add-to-cart-ubb']", "input[name='submit.buy-now']",
+    "[id='submit.add-to-cart']", "[id='submit.buy-now']",
+)
+AMAZON_SELLER_SELECTORS = (
+    "#merchantInfoFeature_feature_div", "#tabular-buybox", "#merchant-info",
+    "#sellerProfileTriggerId", "#offerDisplayFeatures_desktop", "#offer-display-features",
+    "#merchantInfoFeature_feature_div .offer-display-feature-text",
+)
 
-    # Who owns the buy box?
+
+def amazon_is_captcha(html: str, soup: BeautifulSoup, status_code: int) -> bool:
+    if status_code in (403, 429, 503):
+        return True
+    if soup.select_one("#productTitle"):
+        # A real product page. Product pages carry lots of script text that can contain words
+        # like "access denied", so the generic markers aren't trusted here.
+        return False
+    low = html[:200000].lower()
+    return any(m in low for m in AMAZON_CAPTCHA_MARKERS) or looks_blocked(status_code, html)
+
+
+def parse_amazon(html: str, status_code: int = 200) -> Result:
+    soup = BeautifulSoup(html, "html.parser")
+    if amazon_is_captcha(html, soup, status_code):
+        return Result(BLOCKED, f"captcha / HTTP {status_code}")
+
+    # Who owns the buy box? The buy-box form's merchantID is the most reliable signal.
     merchant = None
     tag = soup.find("input", attrs={"name": "merchantID"}) or soup.find(id="merchantID")
     if tag and tag.get("value"):
@@ -233,38 +260,65 @@ def parse_amazon(html: str, status_code: int = 200) -> Result:
         merchant = m.group(1) if m else None
 
     seller_text = ""
-    for sel in ("#merchantInfoFeature_feature_div", "#tabular-buybox", "#merchant-info",
-                "#sellerProfileTriggerId", "#offerDisplayFeatures_desktop"):
+    for sel in AMAZON_SELLER_SELECTORS:
         el = soup.select_one(sel)
         if el:
             seller_text += " " + el.get_text(" ", strip=True)
     seller_text = re.sub(r"\s+", " ", seller_text).strip()
 
-    has_cart = bool(soup.find(id="add-to-cart-button") or soup.find(id="buy-now-button"))
-    avail_el = soup.select_one("#availability")
-    avail_text = avail_el.get_text(" ", strip=True).lower() if avail_el else ""
-    unavailable = "currently unavailable" in avail_text or "out of stock" in avail_text
+    has_cart = any(soup.select_one(sel) for sel in AMAZON_CART_SELECTORS)
+    offer_el = soup.find("input", attrs={"name": re.compile(r"offerListingI[dD]", re.I)})
+    has_offer = bool(offer_el and (offer_el.get("value") or "").strip())
 
-    price_el = soup.select_one("#corePrice_feature_div .a-offscreen, .priceToPay .a-offscreen, #price_inside_buybox")
+    avail_el = soup.select_one("#availability") or soup.select_one("#availability_feature_div")
+    avail_text = re.sub(r"\s+", " ", avail_el.get_text(" ", strip=True)).lower() if avail_el else ""
+    unavailable = any(k in avail_text for k in ("currently unavailable", "out of stock",
+                                                "unavailable", "not available"))
+    says_in_stock = bool(re.search(r"\bin stock\b|left in stock|only \d+ left|available to ship",
+                                   avail_text))
+
+    price_el = soup.select_one("#corePrice_feature_div .a-offscreen, .priceToPay .a-offscreen, "
+                               "#corePriceDisplay_desktop_feature_div .a-offscreen, #price_inside_buybox")
     price = price_el.get_text(strip=True) if price_el else None
 
-    if not has_cart or unavailable:
+    if unavailable:
+        return Result(OUT_OF_STOCK, avail_text[:80])
+    if not (has_cart or has_offer or says_in_stock):
         return Result(OUT_OF_STOCK, avail_text[:80] or "no buy box")
 
-    is_amazon = merchant == AMAZON_CA_MERCHANT_ID or bool(
-        re.search(r"sold by\s*amazon\.ca", seller_text, re.I)
-        or re.search(r"ships from and sold by amazon\.ca", seller_text, re.I)
-    )
+    if merchant:  # the buy box says exactly who sells it - trust that over page text
+        is_amazon = merchant == AMAZON_CA_MERCHANT_ID
+    else:
+        is_amazon = bool(re.search(r"sold by\s*:?\s*amazon\.ca\b", seller_text, re.I))
+    detail = avail_text[:80] or "in stock"
     if is_amazon:
-        return Result(IN_STOCK, avail_text[:80] or "in stock", price=price, seller="Amazon.ca")
-    who = merchant or seller_text[:60] or "unknown seller"
-    return Result(THIRD_PARTY, f"buy box held by {who}", price=price, seller=who)
+        return Result(IN_STOCK, detail, price=price, seller="Amazon.ca")
+    if merchant or re.search(r"sold by", seller_text, re.I):
+        who = merchant or seller_text[:60]
+        return Result(THIRD_PARTY, f"buy box held by {who}", price=price, seller=who)
+    # Looks buyable but we can't see who sells it -> never alert on a guess.
+    return Result(UNKNOWN, f"{detail} but seller not found (not alerting)", price=price)
+
+
+def save_debug_html(name: str, html: str) -> None:
+    """Keep a copy of a page the bot couldn't read, so the parser can be fixed (DEBUG_DIR)."""
+    d = os.environ.get("DEBUG_DIR")
+    if not d:
+        return
+    try:
+        Path(d).mkdir(parents=True, exist_ok=True)
+        (Path(d) / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.html").write_text(html[:3_000_000])
+    except OSError:
+        pass
 
 
 def check_amazon(p: Product) -> Result:
     url = f"https://www.amazon.ca/dp/{p.asin}?th=1&psc=1" if p.asin else p.url
     r = fetch(url)
-    return parse_amazon(r.text, r.status_code)
+    res = parse_amazon(r.text, r.status_code)
+    if res.status == UNKNOWN or (res.status == BLOCKED and r.status_code == 200):
+        save_debug_html(f"amazon-{p.asin or 'page'}-{res.status}", r.text)
+    return res
 
 
 def parse_walmart(html: str, status_code: int = 200) -> Result:
@@ -313,7 +367,10 @@ def parse_walmart(html: str, status_code: int = 200) -> Result:
 
 def check_walmart(p: Product) -> Result:
     r = fetch(p.url)
-    return parse_walmart(r.text, r.status_code)
+    res = parse_walmart(r.text, r.status_code)
+    if res.status == UNKNOWN:
+        save_debug_html(f"walmart-{p.url.rstrip('/').rsplit('/', 1)[-1]}-{res.status}", r.text)
+    return res
 
 
 def parse_generic(html: str, status_code: int, first_party_names: tuple[str, ...]) -> Result:
