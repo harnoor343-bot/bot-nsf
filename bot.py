@@ -64,6 +64,8 @@ UNKNOWN = "UNKNOWN"              # page loaded but couldn't tell
 AMAZON_CA_MERCHANT_ID = "A3DWYIK6Y9EEQB"   # Amazon.ca's own seller id
 HEALTH_ALERT_AFTER = int(os.environ.get("HEALTH_ALERT_AFTER") or "60")  # consecutive failed rounds
 REMIND_HOURS = float(os.environ.get("REMIND_HOURS") or "0")             # 0 = only alert on change
+# Best Buy store pickup stock is checked near this postal code (first 3 characters are enough).
+POSTAL_CODE = os.environ.get("POSTAL_CODE") or "V3T"                    # Surrey, BC
 
 HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -182,10 +184,13 @@ def check_bestbuy(products: list[Product]) -> dict[str, Result]:
     out: dict[str, Result] = {}
     if not skus:
         return out
+    postal = re.sub(r"\s+", "", POSTAL_CODE).upper()
     url = (
         "https://www.bestbuy.ca/ecomm-api/availability/products"
         "?accept=application%2Fvnd.bestbuy.standardproduct.v1%2Bjson"
-        "&accept-language=en-CA&skus=" + "%7C".join(skus)
+        "&accept-language=en-CA"
+        + (f"&postalCode={urllib.parse.quote(postal)}" if postal else "")
+        + "&skus=" + "%7C".join(skus)
     )
     try:
         r = fetch(url, headers={"Accept": "application/json", "Referer": "https://www.bestbuy.ca/"})
@@ -197,6 +202,8 @@ def check_bestbuy(products: list[Product]) -> dict[str, Result]:
         return {p.key: Result(ERROR, f"{type(e).__name__}: {e}"[:200]) for p in products}
 
     by_sku = {str(a.get("sku")): a for a in data.get("availabilities", [])}
+    if postal and any("locations" not in (a.get("pickup") or {}) for a in by_sku.values()):
+        save_debug_html("bestbuy-availability", text)  # unexpected shape - keep it so it can be checked
     for p in products:
         a = by_sku.get(p.sku or "")
         if not a:
@@ -206,16 +213,40 @@ def check_bestbuy(products: list[Product]) -> dict[str, Result]:
         pick = a.get("pickup") or {}
         ship_ok = bool(ship.get("purchasable"))
         pick_ok = bool(pick.get("purchasable"))
-        detail = f"ship={ship.get('status')} pickup={pick.get('status')}"
-        if ship_ok or pick_ok:
-            how = "ship + pickup" if ship_ok and pick_ok else ("ships to home" if ship_ok else "store pickup only")
-            qty = ship.get("quantityRemaining")
-            if qty:
-                how += f", ~{qty} left"
-            out[p.key] = Result(IN_STOCK, how, seller="Best Buy")
+        stores = bestbuy_stores_with_stock(pick)
+        near = f" near {postal}" if postal else ""
+        detail = f"ship={ship.get('status')} pickup{near}={pick.get('status')}"
+        if ship_ok or pick_ok or stores:
+            parts = []
+            if ship_ok:
+                qty = ship.get("quantityRemaining")
+                parts.append("ships to home" + (f" (~{qty} left)" if qty else ""))
+            if stores:
+                parts.append("in store: " + ", ".join(stores[:5]))
+                if not pick_ok:
+                    parts.append("not reservable online - call/visit the store")
+            elif pick_ok:
+                parts.append(f"store pickup{near}")
+            out[p.key] = Result(IN_STOCK, "; ".join(parts), seller="Best Buy")
         else:
             out[p.key] = Result(OUT_OF_STOCK, detail)
     return out
+
+
+def bestbuy_stores_with_stock(pickup: dict) -> list[str]:
+    """Nearby Best Buy stores that report stock, e.g. ['Guildford (2)', 'Coquitlam']."""
+    found = []
+    for loc in pickup.get("locations") or []:
+        if not isinstance(loc, dict):
+            continue
+        try:
+            qty = int(loc.get("quantityOnHand") or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty > 0 or loc.get("hasInventory") is True:
+            name = str(loc.get("name") or loc.get("locationKey") or "store").strip()
+            found.append(f"{name} ({qty})" if qty > 0 else name)
+    return found
 
 
 AMAZON_CAPTCHA_MARKERS = ("validatecaptcha", "type the characters you see",
