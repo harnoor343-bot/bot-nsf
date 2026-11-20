@@ -58,3 +58,13 @@ jobs:
         with:
           path: state
           key: ps5-state-${{ github.run_id }}
+     
+      DEBUG_DIR: debug
+      
+      - name: Save unreadable pages
+        if: ${{ always() && hashFiles('debug/*.html') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreadable-pages
+          path: debug/
+          retention-days: 7
