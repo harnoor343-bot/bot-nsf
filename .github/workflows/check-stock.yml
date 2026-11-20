@@ -2,7 +2,8 @@ name: PS5 stock check
 
 on:
   schedule:
-    - cron: "2-59/5 * * * *"
+    # Backup only: each run starts the next one itself (see "Queue next check").
+    - cron: "17,47 * * * *"
   workflow_dispatch:
     inputs:
       test_email:
@@ -17,7 +18,10 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
     env:
       NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || 'ps5-alerts-0f701b06d64b' }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -51,7 +55,7 @@ jobs:
 
       - name: Check stock
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.test_email) }}
-        run: python bot.py --loop-minutes 4 --interval 60
+        run: python bot.py --loop-minutes 10 --interval 60
 
       - name: Save bot memory
         if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.test_email) }}
@@ -60,6 +64,7 @@ jobs:
           path: state
           key: ps5-state-${{ github.run_id }}
 
+      # Pages the bot couldn't read (if any) - download from the run page to get the parser fixed.
       - name: Save unreadable pages
         if: ${{ always() && hashFiles('debug/*.html') != '' }}
         uses: actions/upload-artifact@v4
@@ -67,3 +72,11 @@ jobs:
           name: unreadable-pages
           path: debug/
           retention-days: 7
+
+      # Start the next check as soon as this one ends, so the bot keeps running
+      # even when GitHub skips scheduled runs. Disable the workflow to stop it.
+      - name: Queue next check
+        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.test_email) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run check-stock.yml --ref "${{ github.ref_name }}"
