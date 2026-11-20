@@ -26,6 +26,7 @@ jobs:
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       STATE_FILE: state/state.json
+      DEBUG_DIR: debug
       REMIND_HOURS: ${{ vars.REMIND_HOURS }}
       HEALTH_ALERT_AFTER: ${{ vars.HEALTH_ALERT_AFTER }}
     steps:
@@ -58,9 +59,7 @@ jobs:
         with:
           path: state
           key: ps5-state-${{ github.run_id }}
-     
-      DEBUG_DIR: debug
-      
+
       - name: Save unreadable pages
         if: ${{ always() && hashFiles('debug/*.html') != '' }}
         uses: actions/upload-artifact@v4
