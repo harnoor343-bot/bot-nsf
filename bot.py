@@ -578,7 +578,7 @@ RETAILER_NAMES = {"bestbuy": "Best Buy", "amazon": "Amazon.ca", "walmart": "Walm
 def build_stock_email(hits: list[tuple[Product, Result]]) -> tuple[str, str, str]:
     models = sorted({p.model for p, _ in hits})
     stores = sorted({RETAILER_NAMES.get(p.retailer, p.retailer) for p, _ in hits})
-    subject = f"PS5 IN STOCK: {', '.join(models)} at {', '.join(stores)}"
+    subject = f" IN STOCK: {', '.join(models)} at {', '.join(stores)}"
     lines, rows = [], []
     for p, r in hits:
         store = RETAILER_NAMES.get(p.retailer, p.retailer)
