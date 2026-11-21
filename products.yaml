@@ -115,3 +115,55 @@ products:
     model: PS5 Slim Digital
     name: PlayStation 5 Digital Edition (Slim)
     url: https://www.ebgames.ca/shop/playstation-5-digital-edition-slim-120914
+    
+  # ================= Xbox Series X =================
+  # ---------------- Best Buy Canada (store pickup near Surrey is checked too) ----------------
+  - retailer: bestbuy
+    model: Xbox Series X
+    name: XBOX Series X 1TB Console (EP2-63831)
+    sku: "20189840"
+    url: https://www.bestbuy.ca/en-ca/product/20189840
+  - retailer: bestbuy
+    model: Xbox Series X
+    name: Xbox Series X 1TB Console (EP2-43335)
+    sku: "19422128"
+    url: https://www.bestbuy.ca/en-ca/product/19422128
+  - retailer: bestbuy
+    model: Xbox Series X
+    name: Xbox Series X 1TB Console (RRT-00001)
+    sku: "14964951"
+    url: https://www.bestbuy.ca/en-ca/product/14964951
+  - retailer: bestbuy
+    model: Xbox Series X Digital
+    name: Xbox Series X 1TB Digital - Robot White (EP2-43338)
+    sku: "19422129"
+    url: https://www.bestbuy.ca/en-ca/product/19422129
+  - retailer: bestbuy
+    model: Xbox Series X Digital
+    name: Xbox Series X 1TB Digital - Robot White (EP2-00692)
+    sku: "18387163"
+    url: https://www.bestbuy.ca/en-ca/product/18387163
+  - retailer: bestbuy
+    model: Xbox Series X 2TB
+    name: Xbox Series X 2TB - Galaxy Black (EP2-00750)
+    sku: "18352211"
+    url: https://www.bestbuy.ca/en-ca/product/18352211
+
+  # ---------------- Amazon.ca (must be sold by Amazon.ca) ----------------
+  - retailer: amazon
+    model: Xbox Series X
+    name: XBOX Series X 1TB Console - Black (EP2-63831)
+    asin: B0HJY5XV6K
+    url: https://www.amazon.ca/dp/B0HJY5XV6K
+  - retailer: amazon
+    model: Xbox Series X
+    name: XBOX Series X 1TB Console (2025) - Carbon Black
+    asin: B0FLL7CY91
+    url: https://www.amazon.ca/dp/B0FLL7CY91
+
+  # ---------------- Walmart.ca (must be sold by Walmart) ----------------
+  - retailer: walmart
+    model: Xbox Series X Digital
+    name: Xbox Series X All Digital 1TB - Robot White
+    url: https://www.walmart.ca/en/ip/Xbox-Series-X-All-Digital-Gaming-Console-1TB-SSD-Includes-Xbox-Wireless-Controller-4K-Gaming-120FPS-Robot-White/3IU2NZDVOYRL
+
